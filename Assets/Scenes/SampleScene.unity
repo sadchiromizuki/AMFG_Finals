@@ -484,6 +484,7 @@ MonoBehaviour:
   movementSpeed: 5
   gravity: 15
   maxHealth: 100
+  maxLives: 3
   invulnerabilityDuration: 1.03
   cameraFollow: {fileID: 0}
   constantZPosition: 0
@@ -494,14 +495,16 @@ MonoBehaviour:
   groundY: -20
   groundWidth: 200
   groundDepth: 1
-  jumpForce: 12
+  jumpForce: 7
   fallMultiplier: 2.5
   lowJumpMultiplier: 2
   maxEnemies: 10
   enemySpawnInterval: 5
   enemySpawnRadius: 20
   enemySpeed: 2
-  enemyDamage: 5
+  enemyDamage: 20
+  powerupSpawnInterval: 8
+  maxPowerups: 5
 --- !u!4 &1548962866
 Transform:
   m_ObjectHideFlags: 0

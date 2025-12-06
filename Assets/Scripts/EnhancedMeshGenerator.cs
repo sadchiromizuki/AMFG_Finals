@@ -5,13 +5,15 @@ using Quaternion = UnityEngine.Quaternion;
 using Random = UnityEngine.Random;
 using Vector3 = UnityEngine.Vector3;
 
-// Enhanced MeshGenerator with collision, player control, enemies, and UI
+// Enhanced MeshGenerator with collision, player control, enemies, powerups, and UI
 public class EnhancedMeshGenerator : MonoBehaviour
 {
     [Header("Mesh Settings")]
     public Material material;
     public int instanceCount = 100;
     private Mesh cubeMesh;
+    private Mesh sphereMesh;
+    private Mesh diamondMesh;
     private List<Matrix4x4> matrices = new List<Matrix4x4>();
     private List<int> colliderIds = new List<int>();
     
@@ -23,13 +25,18 @@ public class EnhancedMeshGenerator : MonoBehaviour
     public float movementSpeed = 5f;
     public float gravity = 9.8f;
     public int maxHealth = 100;
+    public int maxLives = 3;
     
     private int playerID = -1;
     private Vector3 playerVelocity = Vector3.zero;
     private bool isGrounded = false;
     private int currentHealth;
+    private int currentLives;
     private float invulnerabilityTime = 0f;
     public float invulnerabilityDuration = 1f;
+    private bool isInvincible = false;
+    private float invincibilityTime = 0f;
+    private float playerFacingDirection = 1f; // 1 for right, -1 for left
     
     [Header("Camera")]
     public PlayerCameraFollow cameraFollow;
@@ -61,6 +68,14 @@ public class EnhancedMeshGenerator : MonoBehaviour
     private List<Enemy> enemies = new List<Enemy>();
     private float enemySpawnTimer = 0f;
     
+    [Header("Powerup Settings")]
+    public float powerupSpawnInterval = 8f;
+    public int maxPowerups = 5;
+    
+    private List<Powerup> powerups = new List<Powerup>();
+    private float powerupSpawnTimer = 0f;
+    private List<Fireball> fireballs = new List<Fireball>();
+    
     [Header("UI")]
     private GameUI gameUI;
     private float gameTime = 0f;
@@ -68,12 +83,19 @@ public class EnhancedMeshGenerator : MonoBehaviour
     void Start()
     {
         currentHealth = maxHealth;
+        currentLives = maxLives;
         
         // Find or create camera if not assigned
         SetupCamera();
 
         // Create the cube mesh
         CreateCubeMesh();
+        
+        // Create sphere mesh for fireballs
+        CreateSphereMesh();
+        
+        // Create diamond mesh for powerups
+        CreateDiamondMesh();
 
         // Create player box
         CreatePlayer();
@@ -92,7 +114,7 @@ public class EnhancedMeshGenerator : MonoBehaviour
     {
         GameObject uiObject = new GameObject("GameUI");
         gameUI = uiObject.AddComponent<GameUI>();
-        gameUI.Initialize(maxHealth);
+        gameUI.Initialize(maxHealth, maxLives);
     }
     
     void SetupCamera()
@@ -189,6 +211,104 @@ public class EnhancedMeshGenerator : MonoBehaviour
         cubeMesh.RecalculateBounds();
     }
     
+    void CreateSphereMesh()
+    {
+        // Create a simple sphere mesh using icosphere-like approach
+        sphereMesh = new Mesh();
+        
+        List<Vector3> vertices = new List<Vector3>();
+        List<int> triangles = new List<int>();
+        
+        // Create sphere using UV sphere method (latitude/longitude)
+        int latitudes = 8;
+        int longitudes = 12;
+        float radius = 0.5f;
+        
+        // Generate vertices
+        for (int lat = 0; lat <= latitudes; lat++)
+        {
+            float theta = lat * Mathf.PI / latitudes;
+            float sinTheta = Mathf.Sin(theta);
+            float cosTheta = Mathf.Cos(theta);
+            
+            for (int lon = 0; lon <= longitudes; lon++)
+            {
+                float phi = lon * 2 * Mathf.PI / longitudes;
+                float sinPhi = Mathf.Sin(phi);
+                float cosPhi = Mathf.Cos(phi);
+                
+                float x = cosPhi * sinTheta;
+                float y = cosTheta;
+                float z = sinPhi * sinTheta;
+                
+                vertices.Add(new Vector3(x * radius, y * radius, z * radius));
+            }
+        }
+        
+        // Generate triangles
+        for (int lat = 0; lat < latitudes; lat++)
+        {
+            for (int lon = 0; lon < longitudes; lon++)
+            {
+                int first = lat * (longitudes + 1) + lon;
+                int second = first + longitudes + 1;
+                
+                triangles.Add(first);
+                triangles.Add(second);
+                triangles.Add(first + 1);
+                
+                triangles.Add(second);
+                triangles.Add(second + 1);
+                triangles.Add(first + 1);
+            }
+        }
+        
+        sphereMesh.vertices = vertices.ToArray();
+        sphereMesh.triangles = triangles.ToArray();
+        sphereMesh.RecalculateNormals();
+        sphereMesh.RecalculateBounds();
+    }
+    
+    void CreateDiamondMesh()
+    {
+        // Create a diamond/rhombus mesh (octahedron)
+        diamondMesh = new Mesh();
+        
+        float size = 0.5f;
+        
+        // 6 vertices: top, bottom, and 4 middle points
+        Vector3[] vertices = new Vector3[6]
+        {
+            new Vector3(0, size, 0),        // Top - 0
+            new Vector3(0, -size, 0),       // Bottom - 1
+            new Vector3(size, 0, 0),        // Right - 2
+            new Vector3(0, 0, size),        // Back - 3
+            new Vector3(-size, 0, 0),       // Left - 4
+            new Vector3(0, 0, -size)        // Front - 5
+        };
+        
+        // 8 triangular faces (4 on top pyramid, 4 on bottom pyramid)
+        int[] triangles = new int[24]
+        {
+            // Top pyramid
+            0, 2, 5,  // Top-Right-Front
+            0, 5, 4,  // Top-Front-Left
+            0, 4, 3,  // Top-Left-Back
+            0, 3, 2,  // Top-Back-Right
+            
+            // Bottom pyramid
+            1, 5, 2,  // Bottom-Front-Right
+            1, 4, 5,  // Bottom-Left-Front
+            1, 3, 4,  // Bottom-Back-Left
+            1, 2, 3   // Bottom-Right-Back
+        };
+        
+        diamondMesh.vertices = vertices;
+        diamondMesh.triangles = triangles;
+        diamondMesh.RecalculateNormals();
+        diamondMesh.RecalculateBounds();
+    }
+    
     void CreatePlayer()
     {
         // Create player at a specific position
@@ -273,7 +393,7 @@ public class EnhancedMeshGenerator : MonoBehaviour
 
     void Update()
     {
-        if (currentHealth <= 0) return;
+        if (currentHealth <= 0 && currentLives <= 0) return;
         
         gameTime += Time.deltaTime;
         gameUI.UpdateTimer(gameTime);
@@ -283,11 +403,173 @@ public class EnhancedMeshGenerator : MonoBehaviour
             invulnerabilityTime -= Time.deltaTime;
         }
         
+        // Update invincibility
+        if (invincibilityTime > 0)
+        {
+            invincibilityTime -= Time.deltaTime;
+            if (invincibilityTime <= 0)
+            {
+                isInvincible = false;
+                gameUI.SetInvincibility(false);
+            }
+        }
+        
+        // Handle fireball shooting
+        if (Input.GetKeyDown(KeyCode.F))
+        {
+            ShootFireball();
+        }
+        
         UpdatePlayer();
         UpdateEnemies();
+        UpdatePowerups();
+        UpdateFireballs();
         SpawnEnemies();
+        SpawnPowerups();
         RenderBoxes();
         RenderEnemies();
+        RenderPowerups();
+        RenderFireballs();
+    }
+    
+    void ShootFireball()
+    {
+        Vector3 playerPos = GetPlayerPosition();
+        // Shoot from the middle of the player in the direction they're facing
+        Vector3 fireballPos = playerPos + new Vector3(playerFacingDirection * 0.1f, height * 0.5f, 0f);
+        Fireball fireball = new Fireball(fireballPos, playerFacingDirection);
+        fireballs.Add(fireball);
+    }
+    
+    void UpdateFireballs()
+    {
+        for (int i = fireballs.Count - 1; i >= 0; i--)
+        {
+            Fireball fireball = fireballs[i];
+            fireball.Update(Time.deltaTime);
+            
+            // Check collision with enemies
+            bool hitEnemy = false;
+            for (int j = enemies.Count - 1; j >= 0; j--)
+            {
+                if (Vector3.Distance(fireball.position, enemies[j].position) < 1.5f)
+                {
+                    enemies[j].Destroy();
+                    enemies.RemoveAt(j);
+                    hitEnemy = true;
+                }
+            }
+            
+            if (hitEnemy)
+            {
+                fireball.Destroy();
+                fireballs.RemoveAt(i);
+                continue;
+            }
+            
+            // Remove fireballs that are too far away
+            Vector3 playerPos = GetPlayerPosition();
+            if (Mathf.Abs(fireball.position.x - playerPos.x) > 50f || fireball.position.y < groundY - 10f)
+            {
+                fireball.Destroy();
+                fireballs.RemoveAt(i);
+            }
+        }
+    }
+    
+    void RenderFireballs()
+    {
+        foreach (Fireball fireball in fireballs)
+        {
+            fireball.Render(sphereMesh);
+        }
+    }
+    
+    void SpawnPowerups()
+    {
+        if (powerups.Count >= maxPowerups) return;
+        
+        powerupSpawnTimer += Time.deltaTime;
+        if (powerupSpawnTimer >= powerupSpawnInterval)
+        {
+            powerupSpawnTimer = 0f;
+            SpawnPowerup();
+        }
+    }
+    
+    void SpawnPowerup()
+    {
+        Vector3 playerPos = GetPlayerPosition();
+        
+        // Spawn near player horizontally, but always above ground at reachable height
+        float spawnX = playerPos.x + Random.Range(-10f, 15f);
+        float spawnY = groundY + Random.Range(1.5f, 2f); // Lower spawn, easier to reach
+        
+        Vector3 spawnPos = new Vector3(spawnX, spawnY, constantZPosition);
+        
+        // Random powerup type - exclude Fireball (only ExtraLife and Invincibility)
+        PowerupType type = (PowerupType)Random.Range(1, 3); // 1 = ExtraLife, 2 = Invincibility
+        Powerup powerup = new Powerup(spawnPos, type);
+        powerups.Add(powerup);
+    }
+    
+    void UpdatePowerups()
+    {
+        Vector3 playerPos = GetPlayerPosition();
+        
+        for (int i = powerups.Count - 1; i >= 0; i--)
+        {
+            Powerup powerup = powerups[i];
+            powerup.Update(Time.deltaTime);
+            
+            // Check collision with player
+            if (Vector3.Distance(powerup.position, playerPos) < 1.5f)
+            {
+                ActivatePowerup(powerup.type);
+                powerup.Destroy();
+                powerups.RemoveAt(i);
+            }
+            
+            // Remove powerups that fall too far
+            if (powerup.position.y < groundY - 50f)
+            {
+                powerup.Destroy();
+                powerups.RemoveAt(i);
+            }
+        }
+    }
+    
+    void ActivatePowerup(PowerupType type)
+    {
+        switch (type)
+        {
+            case PowerupType.ExtraLife:
+                currentLives++;
+                gameUI.UpdateLives(currentLives);
+                gameUI.ShowExtraLifeMessage();
+                Debug.Log("Extra Life collected! Lives: " + currentLives);
+                break;
+                
+            case PowerupType.Invincibility:
+                isInvincible = true;
+                invincibilityTime = 10f; // 10 seconds of invincibility
+                gameUI.SetInvincibility(true);
+                Debug.Log("Invincibility activated!");
+                break;
+                
+            case PowerupType.Fireball:
+                ShootFireball();
+                Debug.Log("Fireball shot!");
+                break;
+        }
+    }
+    
+    void RenderPowerups()
+    {
+        foreach (Powerup powerup in powerups)
+        {
+            powerup.Render(diamondMesh);
+        }
     }
     
     void SpawnEnemies()
@@ -336,10 +618,19 @@ public class EnhancedMeshGenerator : MonoBehaviour
             enemy.Update(Time.deltaTime, playerPos);
             
             // Check collision with player
-            if (invulnerabilityTime <= 0 && Vector3.Distance(enemy.position, playerPos) < 1.5f)
+            if (Vector3.Distance(enemy.position, playerPos) < 1.5f)
             {
-                TakeDamage(enemy.damage);
-                invulnerabilityTime = invulnerabilityDuration;
+                if (isInvincible)
+                {
+                    // Kill enemy on contact
+                    enemy.Destroy();
+                    enemies.RemoveAt(i);
+                }
+                else if (invulnerabilityTime <= 0)
+                {
+                    TakeDamage(enemy.damage);
+                    invulnerabilityTime = invulnerabilityDuration;
+                }
             }
             
             // Remove enemies that fall too far
@@ -360,13 +651,38 @@ public class EnhancedMeshGenerator : MonoBehaviour
         
         if (currentHealth <= 0)
         {
-            OnPlayerDeath();
+            if (currentLives > 0)
+            {
+                // Respawn with full health
+                currentLives--;
+                currentHealth = maxHealth;
+                gameUI.UpdateHealth(currentHealth);
+                gameUI.UpdateLives(currentLives);
+                
+                // Reset player position
+                RespawnPlayer();
+            }
+            else
+            {
+                OnPlayerDeath();
+            }
         }
+    }
+    
+    void RespawnPlayer()
+    {
+        Vector3 respawnPos = new Vector3(0, 10, constantZPosition);
+        Matrix4x4 newMatrix = Matrix4x4.TRS(respawnPos, Quaternion.identity, Vector3.one);
+        matrices[colliderIds.IndexOf(playerID)] = newMatrix;
+        CollisionManager.Instance.UpdateCollider(playerID, respawnPos, new Vector3(width, height, depth));
+        CollisionManager.Instance.UpdateMatrix(playerID, newMatrix);
+        playerVelocity = Vector3.zero;
+        invulnerabilityTime = invulnerabilityDuration * 2f; // Extra invulnerability on respawn
     }
     
     void OnPlayerDeath()
     {
-        Debug.Log("Player died! Time survived: " + gameTime.ToString("F1") + " seconds");
+        Debug.Log("Game Over! Time survived: " + gameTime.ToString("F1") + " seconds");
         // Could add game over UI here
     }
     
@@ -397,6 +713,12 @@ public class EnhancedMeshGenerator : MonoBehaviour
         float horizontal = 0;
         if (Input.GetKey(KeyCode.A)) horizontal -= 1;
         if (Input.GetKey(KeyCode.D)) horizontal += 1;
+        
+        // Update facing direction based on movement input
+        if (horizontal != 0)
+        {
+            playerFacingDirection = horizontal > 0 ? 1f : -1f;
+        }
 
         if (isGrounded && Input.GetKeyDown(KeyCode.Space))
         {
@@ -511,6 +833,123 @@ public class EnhancedMeshGenerator : MonoBehaviour
     }
 }
 
+// Powerup types enum
+public enum PowerupType
+{
+    Fireball,
+    ExtraLife,
+    Invincibility
+}
+
+// Powerup class
+public class Powerup
+{
+    public Vector3 position;
+    public PowerupType type;
+    private Material powerupMaterial;
+    private int colliderID;
+    private Vector3 size = new Vector3(0.6f, 0.6f, 0.6f);
+    private float rotationSpeed = 90f;
+    private float rotation = 0f;
+    private float bobSpeed = 2f;
+    private float bobAmount = 0.3f;
+    private float bobTimer = 0f;
+    private Vector3 startPosition;
+    
+    public Powerup(Vector3 startPos, PowerupType powerupType)
+    {
+        position = startPos;
+        startPosition = startPos;
+        type = powerupType;
+        
+        // Register collider for powerup
+        colliderID = CollisionManager.Instance.RegisterCollider(position, size, false);
+        
+        powerupMaterial = new Material(Shader.Find("Unlit/Color"));
+        
+        // Different colors for different powerup types
+        switch (type)
+        {
+            case PowerupType.Fireball:
+                powerupMaterial.color = new Color(1f, 0.5f, 0f); // Orange
+                break;
+            case PowerupType.ExtraLife:
+                powerupMaterial.color = new Color(0f, 1f, 0f); // Green
+                break;
+            case PowerupType.Invincibility:
+                powerupMaterial.color = new Color(0.5f, 0f, 1f); // Purple
+                break;
+        }
+    }
+    
+    public void Update(float deltaTime)
+    {
+        // Rotate powerup
+        rotation += rotationSpeed * deltaTime;
+        
+        // Bob up and down
+        bobTimer += deltaTime;
+        float bobOffset = Mathf.Sin(bobTimer * bobSpeed) * bobAmount;
+        position.y = startPosition.y + bobOffset;
+        
+        CollisionManager.Instance.UpdateCollider(colliderID, position, size);
+    }
+    
+    public void Destroy()
+    {
+        CollisionManager.Instance.RemoveCollider(colliderID);
+    }
+    
+    public void Render(Mesh mesh)
+    {
+        Quaternion rot = Quaternion.Euler(0, 0, rotation);
+        Matrix4x4 matrix = Matrix4x4.TRS(position, rot, Vector3.one * 0.6f);
+        Graphics.DrawMesh(mesh, matrix, powerupMaterial, 0);
+    }
+}
+
+// Fireball class
+public class Fireball
+{
+    public Vector3 position;
+    private float speed = 15f;
+    private float direction; // 1 for right, -1 for left
+    private Material fireballMaterial;
+    private int colliderID;
+    private Vector3 size = new Vector3(0.5f, 0.5f, 0.5f);
+    
+    public Fireball(Vector3 startPos, float dir)
+    {
+        position = startPos;
+        direction = dir;
+        
+        // Register collider for fireball
+        colliderID = CollisionManager.Instance.RegisterCollider(position, size, false);
+        
+        fireballMaterial = new Material(Shader.Find("Unlit/Color"));
+        fireballMaterial.color = new Color(1f, 0.3f, 0f); // Bright orange
+    }
+    
+    public void Update(float deltaTime)
+    {
+        // Move fireball in straight line
+        position.x += direction * speed * deltaTime;
+        
+        CollisionManager.Instance.UpdateCollider(colliderID, position, size);
+    }
+    
+    public void Destroy()
+    {
+        CollisionManager.Instance.RemoveCollider(colliderID);
+    }
+    
+    public void Render(Mesh mesh)
+    {
+        Matrix4x4 matrix = Matrix4x4.TRS(position, Quaternion.identity, Vector3.one * 0.5f);
+        Graphics.DrawMesh(mesh, matrix, fireballMaterial, 0);
+    }
+}
+
 // Enemy class
 public class Enemy
 {
@@ -611,22 +1050,49 @@ public class GameUI : MonoBehaviour
 {
     private Rect healthBarRect = new Rect(20, 20, 200, 30);
     private Rect timerRect;
+    private Rect livesRect;
     private int currentHealth;
     private int maxHealth;
     private float gameTime;
+    private int currentLives;
+    private bool isInvincible = false;
     private GUIStyle timerStyle;
+    private GUIStyle livesStyle;
+    private GUIStyle invincibleStyle;
+    private GUIStyle extraLifeStyle;
     private GUIStyle bgStyle;
+    private float extraLifeMessageTime = 0f;
+    private float extraLifeMessageDuration = 2f;
     
-    public void Initialize(int maxHp)
+    public void Initialize(int maxHp, int maxLives)
     {
         maxHealth = maxHp;
         currentHealth = maxHp;
+        currentLives = maxLives;
         
         timerStyle = new GUIStyle();
         timerStyle.fontSize = 20;
         timerStyle.normal.textColor = Color.white;
         timerStyle.fontStyle = FontStyle.Bold;
         timerStyle.alignment = TextAnchor.MiddleCenter;
+        
+        livesStyle = new GUIStyle();
+        livesStyle.fontSize = 18;
+        livesStyle.normal.textColor = Color.white;
+        livesStyle.fontStyle = FontStyle.Bold;
+        livesStyle.alignment = TextAnchor.MiddleLeft;
+        
+        invincibleStyle = new GUIStyle();
+        invincibleStyle.fontSize = 24;
+        invincibleStyle.normal.textColor = new Color(1f, 0.5f, 1f);
+        invincibleStyle.fontStyle = FontStyle.Bold;
+        invincibleStyle.alignment = TextAnchor.MiddleCenter;
+        
+        extraLifeStyle = new GUIStyle();
+        extraLifeStyle.fontSize = 28;
+        extraLifeStyle.normal.textColor = new Color(0f, 1f, 0f);
+        extraLifeStyle.fontStyle = FontStyle.Bold;
+        extraLifeStyle.alignment = TextAnchor.MiddleCenter;
         
         bgStyle = new GUIStyle();
         bgStyle.normal.background = MakeTex(2, 2, new Color(0, 0, 0, 0.5f));
@@ -637,13 +1103,34 @@ public class GameUI : MonoBehaviour
         currentHealth = health;
     }
     
+    public void UpdateLives(int lives)
+    {
+        currentLives = lives;
+    }
+    
     public void UpdateTimer(float time)
     {
         gameTime = time;
     }
     
+    public void SetInvincibility(bool invincible)
+    {
+        isInvincible = invincible;
+    }
+    
+    public void ShowExtraLifeMessage()
+    {
+        extraLifeMessageTime = extraLifeMessageDuration;
+    }
+    
     void OnGUI()
     {
+        // Update extra life message timer
+        if (extraLifeMessageTime > 0)
+        {
+            extraLifeMessageTime -= Time.deltaTime;
+        }
+        
         // Health bar
         Texture2D blackTex = MakeTex(2, 2, Color.black);
         GUI.DrawTexture(new Rect(healthBarRect.x - 2, healthBarRect.y - 2, healthBarRect.width + 4, healthBarRect.height + 4), blackTex);
@@ -652,6 +1139,10 @@ public class GameUI : MonoBehaviour
         Color healthColor = Color.Lerp(Color.red, Color.green, healthPercent);
         Texture2D healthTex = MakeTex(2, 2, healthColor);
         GUI.DrawTexture(new Rect(healthBarRect.x, healthBarRect.y, healthBarRect.width * healthPercent, healthBarRect.height), healthTex);
+        
+        // Lives counter
+        livesRect = new Rect(20, 60, 150, 30);
+        GUI.Label(livesRect, "Lives: " + currentLives, livesStyle);
         
         // Timer
         int minutes = Mathf.FloorToInt(gameTime / 60f);
@@ -662,8 +1153,33 @@ public class GameUI : MonoBehaviour
         timerRect = new Rect(Screen.width - timerWidth - 20, 20, timerWidth, 30);
         
         GUI.Box(new Rect(timerRect.x - 5, timerRect.y - 5, timerRect.width + 10, timerRect.height + 10), "", bgStyle);
-        
         GUI.Label(timerRect, timerText, timerStyle);
+        
+        // Invincibility indicator
+        if (isInvincible)
+        {
+            Rect invincibleRect = new Rect(Screen.width / 2 - 100, 20, 200, 40);
+            GUI.Box(new Rect(invincibleRect.x - 5, invincibleRect.y - 5, invincibleRect.width + 10, invincibleRect.height + 10), "", bgStyle);
+            GUI.Label(invincibleRect, "INVINCIBLE!", invincibleStyle);
+        }
+        
+        // Extra life message
+        if (extraLifeMessageTime > 0)
+        {
+            Rect extraLifeRect = new Rect(Screen.width / 2 - 150, Screen.height / 2 - 50, 300, 50);
+            GUI.Box(new Rect(extraLifeRect.x - 5, extraLifeRect.y - 5, extraLifeRect.width + 10, extraLifeRect.height + 10), "", bgStyle);
+            GUI.Label(extraLifeRect, "+ EXTRA LIFE!", extraLifeStyle);
+        }
+        
+        // Controls help
+        GUIStyle helpStyle = new GUIStyle();
+        helpStyle.fontSize = 14;
+        helpStyle.normal.textColor = Color.white;
+        helpStyle.alignment = TextAnchor.LowerLeft;
+        
+        string helpText = "Controls: A/D - Move, Space - Jump, F - Fireball";
+        Rect helpRect = new Rect(20, Screen.height - 40, 400, 30);
+        GUI.Label(helpRect, helpText, helpStyle);
     }
     
     private Texture2D MakeTex(int width, int height, Color col)
